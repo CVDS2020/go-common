@@ -1,0 +1,263 @@
+package pool
+
+import (
+	"encoding/json"
+	"fmt"
+	"gitee.com/sy_183/common/uns"
+	"sync"
+	"sync/atomic"
+)
+
+const (
+	DefaultStackSize  = 16
+	DefaultBufferSize = 1 << 16
+)
+
+type refBuffer struct {
+	buffer   []byte
+	refCount int64
+	pool     *DataPool
+}
+
+func (b *refBuffer) release() {
+	if c := atomic.AddInt64(&b.refCount, -1); c == 0 {
+		pool := b.pool
+		pool.lock.Lock()
+		if pool.top == 0 {
+			pool.lock.Unlock()
+			return
+		}
+		pool.top--
+		pool.stack[pool.top] = b
+		pool.lock.Unlock()
+	} else if c < 0 {
+		panic("buffer repeat release")
+	}
+}
+
+func (b *refBuffer) addRef() {
+	if atomic.AddInt64(&b.refCount, 1) <= 0 {
+		panic("negative buffer reference count")
+	}
+}
+
+func (b *refBuffer) use() *refBuffer {
+	b.addRef()
+	return b
+}
+
+type DataPool struct {
+	name string
+
+	stack []*refBuffer
+	top   int
+
+	bufferSize uint
+
+	buffer *refBuffer
+	index  uint
+
+	overflowCount    uint
+	overflowMemTotal uint
+
+	stackAllocCount    uint
+	stackAllocMemTotal uint
+
+	lock sync.Mutex
+}
+
+type DataPoolConfig struct {
+	Name       string
+	StackSize  uint
+	BufferSize uint
+	Reversed   uint
+}
+
+func (c *DataPoolConfig) DefaultHandle() {
+	if c.StackSize == 0 {
+		c.StackSize = DefaultStackSize
+	}
+	if c.BufferSize == 0 {
+		c.BufferSize = DefaultBufferSize
+	}
+}
+
+type DataPoolInfo struct {
+	Name                  string `json:"name"`
+	StackSize             uint   `json:"stack-size"`
+	BufferSize            uint   `json:"buffer-size"`
+	MemoryTotal           uint   `json:"memory-total"`
+	MemoryUsed            uint   `json:"memory-used"`
+	StackAllocCount       uint   `json:"stack-alloc-count"`
+	StackAllocMemoryTotal uint   `json:"stack-alloc-memory-total"`
+	OverflowCount         uint   `json:"overflow-count"`
+	OverflowMemoryTotal   uint   `json:"overflow-memory-total"`
+	AllocCount            uint   `json:"alloc-count"`
+	AllocMemoryTotal      uint   `json:"alloc-memory-total"`
+}
+
+func (i *DataPoolInfo) String() string {
+	data, _ := json.Marshal(i)
+	return uns.BytesToString(data)
+}
+
+func NewDataPool(config DataPoolConfig) *DataPool {
+	config.DefaultHandle()
+	stack := make([]*refBuffer, config.StackSize)
+	pool := &DataPool{
+		stack:      stack,
+		bufferSize: config.BufferSize,
+	}
+	if config.Name == "" {
+		pool.name = fmt.Sprintf("%p", pool)
+	} else {
+		pool.name = config.Name
+	}
+
+	for i := range stack {
+		stack[i] = &refBuffer{
+			buffer: make([]byte, pool.bufferSize),
+			pool:   pool,
+		}
+	}
+
+	return pool
+}
+
+func (d *DataPool) Name() string {
+	return d.name
+}
+
+func (d *DataPool) StackSize() uint {
+	return uint(len(d.stack))
+}
+
+func (d *DataPool) BufferSize() uint {
+	return d.bufferSize
+}
+
+func (d *DataPool) MemoryTotal() uint {
+	return uint(len(d.stack)) * d.bufferSize
+}
+
+func (d *DataPool) memoryUsed() uint {
+	if d.buffer == nil {
+		return uint(d.top) * d.bufferSize
+	} else {
+		return (uint(d.top)-1)*d.bufferSize + d.index
+	}
+}
+
+func (d *DataPool) MemoryUsed() uint {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	return d.memoryUsed()
+}
+
+func (d *DataPool) AllocCount() uint {
+	return d.stackAllocCount
+}
+
+func (d *DataPool) AllocMemoryTotal() uint {
+	return d.stackAllocMemTotal
+}
+
+func (d *DataPool) OverflowCount() uint {
+	return d.overflowCount
+}
+
+func (d *DataPool) OverflowMemoryTotal() uint {
+	return d.overflowMemTotal
+}
+
+func (d *DataPool) DataPoolInfo() *DataPoolInfo {
+	d.lock.Lock()
+	info := &DataPoolInfo{
+		MemoryUsed:            d.memoryUsed(),
+		StackAllocCount:       d.stackAllocCount,
+		StackAllocMemoryTotal: d.stackAllocMemTotal,
+		OverflowCount:         d.overflowCount,
+		OverflowMemoryTotal:   d.overflowMemTotal,
+	}
+	d.lock.Unlock()
+	info.Name = d.name
+	info.StackSize = d.StackSize()
+	info.BufferSize = d.bufferSize
+	info.MemoryTotal = d.MemoryTotal()
+	info.AllocCount = d.stackAllocCount + d.overflowCount
+	info.AllocMemoryTotal = d.stackAllocMemTotal + d.overflowMemTotal
+	return info
+}
+
+func (d *DataPool) initBuffer() bool {
+	if d.top == len(d.stack) {
+		return false
+	}
+	d.buffer = d.stack[d.top].use()
+	d.top++
+	return true
+}
+
+func (d *DataPool) clearBuffer() {
+	d.buffer.release()
+	d.buffer = nil
+	d.index = 0
+}
+
+func (d *DataPool) setStackAlloc(size uint) {
+	d.stackAllocCount++
+	d.stackAllocMemTotal += size
+}
+
+func (d *DataPool) setOverflow(size uint) {
+	d.overflowCount++
+	d.overflowMemTotal += size
+}
+
+// Alloc function alloc specified size data from buffer of DataPool, return
+// reference count data. if size greater than bufferSize of DataPool or stack
+// full, use make builtin function create data,
+func (d *DataPool) Alloc(len uint) Data {
+	return d.AllocCap(len, len)
+}
+
+func (d *DataPool) AllocCap(len uint, cap uint) (data Data) {
+	d.lock.Lock()
+	end := d.index + cap
+	switch {
+	case cap > d.bufferSize:
+		d.setOverflow(cap)
+		d.lock.Unlock()
+		// size overflow, use make alloc memory
+		data.Data = make([]byte, len, cap)
+		return
+	case d.buffer == nil:
+		// buffer not init, because first call or last time stack full
+		if !d.initBuffer() {
+			d.setOverflow(cap)
+			d.lock.Unlock()
+			// stack still full, use make alloc memory
+			data.Data = make([]byte, len, cap)
+			return
+		}
+	case end > d.bufferSize:
+		// buffer overflow, clear and init new buffer
+		d.clearBuffer()
+		if !d.initBuffer() {
+			d.setOverflow(cap)
+			d.lock.Unlock()
+			// stack full, use make alloc memory
+			data.Data = make([]byte, len, cap)
+			return
+		}
+		end = cap
+	}
+	data.Data = d.buffer.buffer[d.index : d.index+len : end]
+	data.buffer = d.buffer.use()
+	if d.index += cap; d.index >= d.bufferSize {
+		d.clearBuffer()
+	}
+	d.setStackAlloc(cap)
+	d.lock.Unlock()
+	return
+}
