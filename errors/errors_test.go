@@ -7,5 +7,6 @@ import (
 
 func TestErrors(t *testing.T) {
 	arr := Errors{}
-	fmt.Println(arr.Error())
+	e := New("hello")
+	fmt.Println(arr.Error(), e)
 }

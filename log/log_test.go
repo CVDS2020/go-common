@@ -38,17 +38,18 @@ func TestLog(t *testing.T) {
 	//logger := assert.Must(config.Build())
 	//zap.NewExample()
 	encoder := NewConsoleEncoder(ConsoleEncoderConfig{
-		DisableStacktrace: true,
-		EncodeLevel:       CapitalColorLevelEncoder,
-		EncodeTime:        TimeEncoderOfLayout("2006-01-02 15:04:05.999999999"),
-		EncodeDuration:    StringDurationEncoder,
-		EncodeCaller:      ShortCallerEncoder,
-		EncodeName:        FullNameEncoder,
+		//DisableStacktrace: true,
+		EncodeLevel:    CapitalColorLevelEncoder,
+		EncodeTime:     TimeEncoderOfLayout("2006-01-02 15:04:05.999999999"),
+		EncodeDuration: StringDurationEncoder,
+		EncodeCaller:   ShortCallerEncoder,
+		EncodeName:     FullNameEncoder,
 	})
-	logger := New(NewCore(encoder, os.Stdout, DebugLevel), AddCaller(), Fields(String("module", "log")))
+	logger := New(NewCore(encoder, os.Stdout, DebugLevel), AddCaller(), AddStacktrace(InfoLevel), Fields(String("module", "log")))
 	logger.Debug(sgr.WrapRGB24("lili", 0x2DF3D8), String("hello", "hi"))
 	logger.Info("hellofdfdddddddddddddddddddddd", String("hello", sgr.WrapColor("dds", sgr.FgBrightBlue)))
 	logger.Warn("hello")
+	logger.Error("hello")
 }
 
 func TestLog1(t *testing.T) {

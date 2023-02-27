@@ -3,6 +3,7 @@ package pool
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"gitee.com/sy_183/common/uns"
 	"sync/atomic"
 )
@@ -10,15 +11,14 @@ import (
 type Data struct {
 	raw  []byte
 	Data []byte
-	ref  int64
-	pool *DataPool
+	Reference
 }
 
 func NewData(data []byte) *Data {
 	return &Data{
-		raw:  data,
-		Data: data,
-		ref:  1,
+		raw:       data,
+		Data:      data,
+		Reference: nil,
 	}
 }
 
@@ -182,22 +182,49 @@ func (d *Data) String() string {
 }
 
 func (d *Data) Release() {
-	if c := atomic.AddInt64(&d.ref, -1); c == 0 {
-		if d.pool != nil {
-			d.pool.put(d)
-		}
-	} else if c < 0 {
-		panic("data repeat release")
+	if d.Reference != nil {
+		d.Reference.Release()
 	}
 }
 
 func (d *Data) AddRef() {
-	if atomic.AddInt64(&d.ref, 1) <= 0 {
-		panic("negative data reference count")
+	if d.Reference != nil {
+		d.Reference.AddRef()
 	}
 }
 
 func (d *Data) Use() *Data {
 	d.AddRef()
 	return d
+}
+
+type refPoolData struct {
+	data Data
+	ref  atomic.Int64
+	pool Pool[*Data]
+}
+
+func newRefPoolData(p Pool[*Data], size uint) *Data {
+	ref := &refPoolData{
+		data: Data{raw: make([]byte, size)},
+		pool: p,
+	}
+	ref.data.Reference = ref
+	return &ref.data
+}
+
+func (d *refPoolData) Release() {
+	if c := d.ref.Add(-1); c == 0 {
+		if d.pool != nil {
+			d.pool.Put(&d.data)
+		}
+	} else if c < 0 {
+		panic(fmt.Errorf("repeat release buffer(%p), ref [%d -> %d]", d, c+1, c))
+	}
+}
+
+func (d *refPoolData) AddRef() {
+	if c := d.ref.Add(1); c <= 0 {
+		panic(fmt.Errorf("invalid buffer(%p) reference, ref [%d -> %d]", d, c-1, c))
+	}
 }

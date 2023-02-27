@@ -3,7 +3,6 @@ package log
 import (
 	"encoding/base64"
 	"gitee.com/sy_183/common/log/internal/bufferpool"
-	"gitee.com/sy_183/common/pool"
 	"io"
 	"math"
 	"sync"
@@ -108,12 +107,12 @@ func NewDevelopmentJsonEncoderConfig() JsonEncoderConfig {
 
 type jsonEncoder struct {
 	*JsonEncoderConfig
-	buf            *pool.Buffer
+	buf            *bufferpool.Buffer
 	spaced         bool // include spaces after colons and commas
 	openNamespaces int
 
 	// for encoding generic values by reflection
-	reflectBuf *pool.Buffer
+	reflectBuf *bufferpool.Buffer
 	reflectEnc ReflectedEncoder
 }
 
@@ -122,7 +121,9 @@ type jsonEncoder struct {
 //
 // Note that the encoder doesn't deduplicate keys, so it's possible to produce
 // a message like
-//   {"foo":"bar","foo":"baz"}
+//
+//	{"foo":"bar","foo":"baz"}
+//
 // This is permitted by the JSON specification, but not encouraged. Many
 // libraries will ignore duplicate key-value pairs (typically keeping the last
 // pair) when unmarshaling, but users should attempt to avoid adding duplicate
@@ -427,7 +428,7 @@ func (enc *jsonEncoder) clone() *jsonEncoder {
 	return clone
 }
 
-func (enc *jsonEncoder) EncodeEntry(ent Entry, fields []Field) (*pool.Buffer, error) {
+func (enc *jsonEncoder) EncodeEntry(ent Entry, fields []Field) (*bufferpool.Buffer, error) {
 	final := enc.clone()
 	final.buf.AppendByte('{')
 

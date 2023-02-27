@@ -1,39 +1,31 @@
 package flag
 
-func TestFlag(flag int, mask int) bool {
+import "gitee.com/sy_183/common/generic"
+
+func TestFlag[F generic.Integer](flag F, mask F) bool {
 	return flag&mask != 0
 }
 
-func TestFlags(flag int, masks ...int) bool {
-	for _, mask := range masks {
-		flag &= mask
-	}
-	return flag != 0
-}
-
-func MaskFlag(flag int, mask int) int {
+func MaskFlag[F generic.Integer](flag F, mask F) F {
 	return flag | mask
 }
 
-func MasksFlag(flag int, masks ...int) int {
-	for _, mask := range masks {
-		flag |= mask
-	}
-	return flag
+func MaskFlagP[F generic.Integer](flagP *F, mask F) {
+	*flagP |= mask
 }
 
-func UnmaskFlag(flag int, mask int) int {
+func UnmaskFlag[F generic.Integer](flag F, mask F) F {
 	return flag & ^mask
 }
 
-func UnmasksFlag(flag int, masks ...int) int {
-	for _, mask := range masks {
-		flag &= ^mask
-	}
-	return flag
+func UnmaskFlagP[F generic.Integer](flagP *F, mask F) {
+	*flagP &= ^mask
 }
 
-func SwapFlagMask(flag int, unmask, mask int) int {
-	flag &= ^unmask
-	return flag | mask
+func SwapFlagMask[F generic.Integer](flag F, unmask, mask F) F {
+	return (flag & ^unmask) | mask
+}
+
+func SwapFlagPMask[F generic.Integer](flagP *F, unmask, mask F) {
+	*flagP = (*flagP & ^unmask) | mask
 }

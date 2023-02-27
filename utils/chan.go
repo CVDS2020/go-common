@@ -18,3 +18,12 @@ func ChanTryPush[O any](c chan O, o O) bool {
 		return false
 	}
 }
+
+func ChanTryPop[O any](c chan O) (o O, ok bool) {
+	select {
+	case o = <-c:
+		ok = true
+	default:
+	}
+	return
+}

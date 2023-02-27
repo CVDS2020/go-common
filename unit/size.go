@@ -183,6 +183,7 @@ func (s *Size) UnmarshalText(text []byte) error {
 			return err
 		}
 		*s = (Size)(f * float64(mul) / float64(div))
+		return nil
 	}
 	*s = (Size)(n * mul / div)
 	return nil

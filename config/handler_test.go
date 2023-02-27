@@ -1,15 +1,20 @@
 package config
 
 import (
+	"gitee.com/sy_183/common/unit"
 	"testing"
+	"time"
 )
 
 type A struct {
-	S  string  `default:"hello"`
-	I  int     `default:"-1"`
-	U  uint    `default:"1"`
-	F  float64 `default:"3.14"`
-	B  bool    `default:"true"`
+	S  string        `default:"hello"`
+	I  int           `default:"-1"`
+	U  uint          `default:"1"`
+	F  float64       `default:"3.14"`
+	B  bool          `default:"true"`
+	T  time.Time     `default:"1998-07-13 00:00:00" timeLayer:"2006-01-02 15:04:05"`
+	D  time.Duration `default:"1s"`
+	UN unit.Size     `default:"1M"`
 	SP *string
 	M  map[string]any  `default:"{username: admin, password: admin@123}"`
 	SS []string        `default:"[192.168.1.11, 192.168.1.12]"`

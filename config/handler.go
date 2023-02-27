@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding"
 	"encoding/json"
+	"gitee.com/sy_183/common/assert"
 	"gitee.com/sy_183/common/errors"
 	"gitee.com/sy_183/common/uns"
 	"gopkg.in/yaml.v3"
@@ -145,8 +147,49 @@ func (postHandler) handleAfterChildren(c any) (nc any, modified bool, err error)
 	return
 }
 
-func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) error {
+func handleDefault(v reflect.Value, zerop, timeLayerp, def *string, cs map[any]struct{}) error {
 	vt := v.Type()
+	if def != nil {
+		var vp, nv reflect.Value
+		if vt.Kind() != reflect.Ptr {
+			if v.CanAddr() {
+				vp = v.Addr()
+			} else {
+				vp = reflect.New(vt)
+				nv = vp.Elem()
+				nv.Set(v)
+			}
+		} else if v.IsNil() {
+			if v.CanSet() {
+				nv = reflect.New(vt.Elem())
+				vp = nv
+			}
+		} else {
+			vp = v
+		}
+		if vp != (reflect.Value{}) {
+			if vp.CanInterface() {
+				vpi := vp.Interface()
+				if tp, is := vpi.(*time.Time); is {
+					t, err := time.Parse(*timeLayerp, *def)
+					if err != nil {
+						return err
+					}
+					*tp = t
+					return nil
+				}
+				if m, is := vpi.(encoding.TextUnmarshaler); is {
+					if err := m.UnmarshalText(uns.StringToBytes(*def)); err != nil {
+						return err
+					}
+					if nv != (reflect.Value{}) {
+						v.Set(nv)
+					}
+					return nil
+				}
+			}
+		}
+	}
 	switch vt.Kind() {
 	case reflect.String:
 		if v.CanSet() && def != nil {
@@ -264,7 +307,7 @@ func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) err
 			// handle array element
 			l := v.Len()
 			for i := 0; i < l; i++ {
-				if err := handleDefault(v.Index(i), nil, nil, cs); err != nil {
+				if err := handleDefault(v.Index(i), nil, nil, nil, cs); err != nil {
 					return err
 				}
 			}
@@ -277,14 +320,18 @@ func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) err
 				}
 				tag := vt.Field(i).Tag
 				if fdef, has := tag.Lookup("default"); has {
+					var fzerop *string
 					if fzero, has := tag.Lookup("zero"); has {
-						if err := handleDefault(fv, &fzero, &fdef, cs); err != nil {
-							return err
-						}
-					} else if err := handleDefault(fv, nil, &fdef, cs); err != nil {
+						fzerop = &fzero
+					}
+					var ftimeLayerp *string
+					if ftimeLayer, has := tag.Lookup("timeLayer"); has {
+						ftimeLayerp = &ftimeLayer
+					}
+					if err := handleDefault(fv, fzerop, ftimeLayerp, &fdef, cs); err != nil {
 						return err
 					}
-				} else if err := handleDefault(fv, nil, nil, cs); err != nil {
+				} else if err := handleDefault(fv, nil, nil, nil, cs); err != nil {
 					return err
 				}
 			}
@@ -337,14 +384,14 @@ func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) err
 			// handle slice element
 			l := v.Len()
 			for i := 0; i < l; i++ {
-				if err := handleDefault(v.Index(i), nil, nil, cs); err != nil {
+				if err := handleDefault(v.Index(i), nil, nil, nil, cs); err != nil {
 					return err
 				}
 			}
 		case reflect.Map:
 			// handle map value
 			for iter := v.MapRange(); iter.Next(); {
-				if err := handleDefault(iter.Value(), nil, nil, cs); err != nil {
+				if err := handleDefault(iter.Value(), nil, nil, nil, cs); err != nil {
 					return err
 				}
 			}
@@ -352,7 +399,7 @@ func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) err
 	case reflect.Ptr:
 		if def != nil && v.CanSet() {
 			nv := reflect.New(vt.Elem())
-			if err := handleDefault(nv.Elem(), zerop, def, cs); err != nil {
+			if err := handleDefault(nv.Elem(), zerop, timeLayerp, def, cs); err != nil {
 				return err
 			}
 			if v.CanInterface() {
@@ -373,7 +420,7 @@ func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) err
 				}
 				cs[v.Interface()] = struct{}{}
 			}
-			if err := handleDefault(v.Elem(), zerop, def, cs); err != nil {
+			if err := handleDefault(v.Elem(), zerop, timeLayerp, def, cs); err != nil {
 				return err
 			}
 		}
@@ -382,7 +429,7 @@ func handleDefault(v reflect.Value, zerop, def *string, cs map[any]struct{}) err
 }
 
 func HandleDefault(c any) error {
-	return handleDefault(reflect.ValueOf(c), nil, nil, make(map[interface{}]struct{}))
+	return handleDefault(reflect.ValueOf(c), nil, nil, nil, make(map[interface{}]struct{}))
 }
 
 func doHandlerPtr(pi any, pv reflect.Value, setFn func(v reflect.Value), handleFn func(c any) (nc any, modified bool, err error), cs map[any]struct{}) (err error, repeat bool) {
@@ -757,4 +804,15 @@ func Handle(c any) error {
 		return err
 	}
 	return nil
+}
+
+func HandleWith[C any](c C) (C, error) {
+	if err := Handle(c); err != nil {
+		return c, err
+	}
+	return c, nil
+}
+
+func MustHandleWith[C any](c C) C {
+	return assert.Must(HandleWith(c))
 }

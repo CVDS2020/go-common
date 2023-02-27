@@ -1,7 +1,7 @@
 package log
 
 import (
-	"gitee.com/sy_183/common/pool"
+	"gitee.com/sy_183/common/log/internal/bufferpool"
 	"gitee.com/sy_183/common/sgr"
 	"gitee.com/sy_183/common/uns"
 	"gopkg.in/yaml.v3"
@@ -52,10 +52,10 @@ func CapitalColorLevelEncoder(l Level, enc PrimitiveArrayEncoder) {
 	enc.AppendString(s)
 }
 
-// UnmarshalText unmarshals text to a LevelEncoder. "capital" is unmarshaled to
-// CapitalLevelEncoder, "coloredCapital" is unmarshaled to CapitalColorLevelEncoder,
-// "colored" is unmarshaled to LowercaseColorLevelEncoder, and anything else
-// is unmarshaled to LowercaseLevelEncoder.
+// UnmarshalText unmarshals text to a LevelEncoder. "capital" is unmarshalled to
+// CapitalLevelEncoder, "coloredCapital" is unmarshalled to CapitalColorLevelEncoder,
+// "colored" is unmarshalled to LowercaseColorLevelEncoder, and anything else
+// is unmarshalled to LowercaseLevelEncoder.
 func (e *LevelEncoder) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case "capital":
@@ -143,12 +143,12 @@ func TimeEncoderOfLayout(layout string) TimeEncoder {
 }
 
 // UnmarshalText unmarshals text to a TimeEncoder.
-// "rfc3339nano" and "RFC3339Nano" are unmarshaled to RFC3339NanoTimeEncoder.
-// "rfc3339" and "RFC3339" are unmarshaled to RFC3339TimeEncoder.
-// "iso8601" and "ISO8601" are unmarshaled to ISO8601TimeEncoder.
-// "millis" is unmarshaled to EpochMillisTimeEncoder.
-// "nanos" is unmarshaled to EpochNanosEncoder.
-// Anything else is unmarshaled to EpochTimeEncoder.
+// "rfc3339nano" and "RFC3339Nano" are unmarshalled to RFC3339NanoTimeEncoder.
+// "rfc3339" and "RFC3339" are unmarshalled to RFC3339TimeEncoder.
+// "iso8601" and "ISO8601" are unmarshalled to ISO8601TimeEncoder.
+// "millis" is unmarshalled to EpochMillisTimeEncoder.
+// "nanos" is unmarshalled to EpochNanosEncoder.
+// Anything else is unmarshalled to EpochTimeEncoder.
 func (e *TimeEncoder) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case "rfc3339nano", "RFC3339Nano":
@@ -168,11 +168,14 @@ func (e *TimeEncoder) UnmarshalText(text []byte) error {
 }
 
 // UnmarshalYAML unmarshals YAML to a TimeEncoder.
-// If value is an object with a "layout" field, it will be unmarshaled to  TimeEncoder with given layout.
-//     timeEncoder:
-//       layout: 06/01/02 03:04pm
+// If value is an object with a "layout" field, it will be unmarshalled to  TimeEncoder with given layout.
+//
+//	timeEncoder:
+//	  layout: 06/01/02 03:04pm
+//
 // If value is string, it uses UnmarshalText.
-//     timeEncoder: iso8601
+//
+//	timeEncoder: iso8601
 func (e *TimeEncoder) UnmarshalYAML(value *yaml.Node) error {
 	var o struct {
 		Layout string `json:"layout" yaml:"layout"`
@@ -236,8 +239,8 @@ func StringDurationEncoder(d time.Duration, enc PrimitiveArrayEncoder) {
 	enc.AppendString(d.String())
 }
 
-// UnmarshalText unmarshals text to a DurationEncoder. "string" is unmarshaled
-// to StringDurationEncoder, and anything else is unmarshaled to
+// UnmarshalText unmarshals text to a DurationEncoder. "string" is unmarshalled
+// to StringDurationEncoder, and anything else is unmarshalled to
 // NanosDurationEncoder.
 func (e *DurationEncoder) UnmarshalText(text []byte) error {
 	switch string(text) {
@@ -270,8 +273,8 @@ func ShortCallerEncoder(caller EntryCaller, enc PrimitiveArrayEncoder) {
 	enc.AppendString(caller.TrimmedPath())
 }
 
-// UnmarshalText unmarshals text to a CallerEncoder. "full" is unmarshaled to
-// FullCallerEncoder and anything else is unmarshaled to ShortCallerEncoder.
+// UnmarshalText unmarshals text to a CallerEncoder. "full" is unmarshalled to
+// FullCallerEncoder and anything else is unmarshalled to ShortCallerEncoder.
 func (e *CallerEncoder) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case "full":
@@ -292,7 +295,7 @@ func FullNameEncoder(loggerName string, enc PrimitiveArrayEncoder) {
 }
 
 // UnmarshalText unmarshals text to a NameEncoder. Currently, everything is
-// unmarshaled to FullNameEncoder.
+// unmarshalled to FullNameEncoder.
 func (e *NameEncoder) UnmarshalText(text []byte) error {
 	switch string(text) {
 	case "full":
@@ -407,5 +410,5 @@ type Encoder interface {
 	// EncodeEntry encodes an entry and fields, along with any accumulated
 	// context, into a byte buffer and returns it. Any fields that are empty,
 	// including fields on the `Entry` type, should be omitted.
-	EncodeEntry(Entry, []Field) (*pool.Buffer, error)
+	EncodeEntry(Entry, []Field) (*bufferpool.Buffer, error)
 }

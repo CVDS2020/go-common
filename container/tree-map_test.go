@@ -36,3 +36,7 @@ func TestMap(t *testing.T) {
 
 	fmt.Println(len(m))
 }
+
+func TestRange(t *testing.T) {
+	_ = []int{1, 2, 3}[5]
+}

@@ -35,8 +35,9 @@ func (t *Timer) After(duration time.Duration) *Timer {
 	return t
 }
 
-func (t *Timer) Stop() {
+func (t *Timer) Stop() bool {
 	if t.timer != nil {
-		t.timer.Stop()
+		return t.timer.Stop()
 	}
+	return false
 }

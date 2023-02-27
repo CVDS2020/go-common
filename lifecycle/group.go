@@ -1,273 +1,299 @@
 package lifecycle
 
 import (
-	"gitee.com/sy_183/common/def"
+	"gitee.com/sy_183/common/assert"
 	"gitee.com/sy_183/common/errors"
-	"gitee.com/sy_183/common/timer"
-	"time"
+	"gitee.com/sy_183/common/lock"
+	"sync"
+	"sync/atomic"
 )
 
-const (
-	contextStateStart = iota
-	contextStateStarted
-	contextStateStartFailed
-	contextStateClosed
-)
+const GroupFieldName = "$group"
 
-type ChildLifecycle struct {
+type GroupLifecycleHolder struct {
 	Lifecycle
-	RetryInterval      time.Duration
-	OnStarted          func(l Lifecycle)
-	OnClosed           func(l Lifecycle)
-	StartErrorCallback func(err error)
-	CloseErrorCallback func(err error)
-	ExitErrorCallback  func(err error)
+	name  string
+	group *Group
+
+	removed atomic.Bool
+
+	closeAllOnStartError atomic.Bool
+	closeAllOnExit       atomic.Bool
+	closeAllOnExitError  atomic.Bool
 }
 
-type context struct {
-	ChildLifecycle
-	index      int
-	retryTimer *timer.Timer
+func (h *GroupLifecycleHolder) Name() string {
+	return h.name
 }
 
-type contextState struct {
-	*context
-	state int
+func (h *GroupLifecycleHolder) Group() *Group {
+	return h.group
 }
 
-func newContext(index int, lifecycle ChildLifecycle) *context {
-	ctx := &context{
-		ChildLifecycle: lifecycle,
-		index:          index,
-		retryTimer:     timer.NewTimer(nil),
-	}
-	def.SetDefaultP(&ctx.RetryInterval, time.Second)
-	return ctx
+func (h *GroupLifecycleHolder) SetCloseAllOnStartError(enable bool) *GroupLifecycleHolder {
+	h.closeAllOnStartError.Store(enable)
+	return h
 }
 
-func (c *context) delayStart(stateChan chan contextState) {
-	c.retryTimer.After(c.RetryInterval)
-	go func() {
-		<-c.retryTimer.C
-		stateChan <- contextState{
-			context: c,
-			state:   contextStateStart,
-		}
-	}()
+func (h *GroupLifecycleHolder) SetCloseAllOnExit(enable bool) *GroupLifecycleHolder {
+	h.closeAllOnExit.Store(enable)
+	return h
 }
 
-func (c *context) start(stateChan chan contextState) {
-	go func() {
-		if err := c.Start(); err != nil {
-			if c.StartErrorCallback != nil {
-				c.StartErrorCallback(err)
-			}
-			stateChan <- contextState{
-				context: c,
-				state:   contextStateStartFailed,
-			}
-			return
-		}
-		if c.OnStarted != nil {
-			c.OnStarted(c.Lifecycle)
-		}
-		stateChan <- contextState{
-			context: c,
-			state:   contextStateStarted,
-		}
-		future := c.AddClosedFuture(nil)
-		go func() {
-			if err := <-future; err != nil {
-				if c.ExitErrorCallback != nil {
-					c.ExitErrorCallback(err)
-				}
-			}
-			if c.OnClosed != nil {
-				c.OnClosed(c.Lifecycle)
-			}
-			stateChan <- contextState{
-				context: c,
-				state:   contextStateClosed,
-			}
-		}()
-	}()
+func (h *GroupLifecycleHolder) SetCloseAllOnExitError(enable bool) *GroupLifecycleHolder {
+	h.closeAllOnExitError.Store(enable)
+	return h
 }
 
-func (c *context) stop(future chan error) {
-	if err := c.Close(future); err != nil {
-		if c.CloseErrorCallback != nil {
-			c.CloseErrorCallback(err)
-		}
-	}
-}
+type (
+	groupLifecycleContext = childLifecycleContext[*GroupLifecycleHolder]
+	groupLifecycleChannel = childLifecycleChannel[*GroupLifecycleHolder]
+)
 
 type Group struct {
 	Lifecycle
-	contexts         []*context
-	stateChan        chan contextState
-	preStart         bool
-	closeRequestChan chan struct{}
+	lifecycle *DefaultLifecycle
+
+	children     map[string]*GroupLifecycleHolder
+	childrenLock sync.Mutex
+	loaded       bool
+
+	runningChannel *groupLifecycleChannel
+	closedChannel  *groupLifecycleChannel
 }
 
-func NewGroup(name string, children []ChildLifecycle, options ...GroupOption) *Group {
+func NewGroup() *Group {
 	g := &Group{
-		contexts:         make([]*context, 0, len(children)),
-		stateChan:        make(chan contextState, len(children)),
-		closeRequestChan: make(chan struct{}, 1),
+		children:       make(map[string]*GroupLifecycleHolder),
+		runningChannel: newChildLifecycleChannel[*GroupLifecycleHolder](),
+		closedChannel:  newChildLifecycleChannel[*GroupLifecycleHolder](),
 	}
-	for _, option := range options {
-		option.apply(g)
-	}
-	for i, child := range children {
-		g.contexts = append(g.contexts, newContext(i, child))
-	}
-	_, g.Lifecycle = New(name, Core(g.start, g.run, g.close))
+	g.lifecycle = NewWithInterruptedStart(g.start)
+	g.Lifecycle = g.lifecycle
 	return g
 }
 
-func (g *Group) start() error {
-	if g.preStart {
-		var doClose bool
-		// running lifecycles index
-		running := make(map[int]struct{})
-		// starting lifecycles index
-		starting := make(map[int]struct{})
-		// start all lifecycle
-		for _, ctx := range g.contexts {
-			starting[ctx.index] = struct{}{}
-			ctx.start(g.stateChan)
-		}
-		var es error
-		for {
-			select {
-			case ctx := <-g.stateChan:
-				switch ctx.state {
-				case contextStateStarted:
-					delete(starting, ctx.index)
-					running[ctx.index] = struct{}{}
-					if doClose {
-						ctx.stop(nil)
-					} else if len(starting) == 0 {
-						for i, ctx := range g.contexts {
-							if _, in := running[i]; !in {
-								g.stateChan <- contextState{
-									context: ctx,
-									state:   contextStateClosed,
-								}
-							}
-						}
-						return nil
-					}
-				case contextStateStartFailed:
-					es = errors.Append(es, ctx.Error())
-					delete(starting, ctx.index)
-					if !doClose {
-						doClose = true
-						// stop all running lifecycle
-						for i, ctx := range g.contexts {
-							if _, in := running[i]; in {
-								ctx.stop(nil)
-							}
-						}
-					}
-					if len(running) == 0 && len(starting) == 0 {
-						// all lifecycle has been stopped
-						return es
-					}
-				case contextStateClosed:
-					delete(running, ctx.index)
-					if doClose {
-						// has lifecycle stopped
-						if len(running) == 0 && len(starting) == 0 {
-							// all lifecycle has been stopped
-							return es
-						}
-					}
-				}
+func (g *Group) Add(name string, lifecycle Lifecycle) (*GroupLifecycleHolder, error) {
+	return lock.RLockGetDouble(g.lifecycle, func() (*GroupLifecycleHolder, error) {
+		var loaded bool
+		child, err := lock.LockGetDouble(&g.childrenLock, func() (*GroupLifecycleHolder, error) {
+			if _, has := g.children[name]; has {
+				return nil, errors.New("生命周期组件已经存在")
 			}
+			loaded = g.loaded
+			child := &GroupLifecycleHolder{
+				Lifecycle: lifecycle,
+				name:      name,
+				group:     g,
+			}
+			child.SetCloseAllOnStartError(true)
+			child.SetCloseAllOnExit(true)
+			child.SetCloseAllOnExitError(true)
+			child.SetField(GroupFieldName, g)
+			g.children[name] = child
+			return child, nil
+		})
+		if err != nil {
+			return nil, err
 		}
-	}
-	return nil
+		if loaded && !g.lifecycle.Closing() {
+			child.AddStartedFuture(groupLifecycleContext{
+				Lifecycle: child,
+				channel:   g.runningChannel,
+			})
+			go child.Run()
+		}
+		return child, nil
+	})
 }
 
-func (g *Group) run() error {
-	var doClose bool
-
-	// running lifecycles index
-	running := make(map[int]struct{})
-	// starting lifecycles index
-	starting := make(map[int]struct{})
-
-	// start all lifecycle
-	if g.preStart {
-		for _, ctx := range g.contexts {
-			running[ctx.index] = struct{}{}
-		}
-	} else {
-		for _, ctx := range g.contexts {
-			starting[ctx.index] = struct{}{}
-			ctx.start(g.stateChan)
-		}
-	}
-
-	// lifecycle monitor
-	for {
-		select {
-		case ctx := <-g.stateChan:
-			switch ctx.state {
-			case contextStateStart:
-				if !doClose {
-					// do start
-					starting[ctx.index] = struct{}{}
-					ctx.start(g.stateChan)
-				}
-			case contextStateStarted:
-				delete(starting, ctx.index)
-				running[ctx.index] = struct{}{}
-				if doClose {
-					ctx.stop(nil)
-				}
-			case contextStateStartFailed:
-				delete(starting, ctx.index)
-				if doClose {
-					if len(running) == 0 && len(starting) == 0 {
-						// all lifecycle has been stopped
-						return nil
-					}
-					continue
-				} else {
-					ctx.delayStart(g.stateChan)
-				}
-			case contextStateClosed:
-				// has lifecycle stopped
-				delete(running, ctx.index)
-				if doClose {
-					if len(running) == 0 && len(starting) == 0 {
-						// all lifecycle has been stopped
-						return nil
-					}
-					continue
-				}
-				// wait a time, restart lifecycle
-				ctx.delayStart(g.stateChan)
-			}
-		case <-g.closeRequestChan:
-			doClose = true
-			// stop all running lifecycle
-			for i, ctx := range g.contexts {
-				if _, in := running[i]; in {
-					ctx.stop(nil)
-				}
-			}
-			if len(running) == 0 && len(starting) == 0 {
-				// all lifecycle has been stopped
+func (g *Group) Remove(name string) *GroupLifecycleHolder {
+	return lock.RLockGet(g.lifecycle, func() *GroupLifecycleHolder {
+		child := lock.LockGet(&g.childrenLock, func() *GroupLifecycleHolder {
+			child := g.children[name]
+			if child == nil {
 				return nil
 			}
+			child.removed.Store(true)
+			child.RemoveField(GroupFieldName)
+			delete(g.children, name)
+			return child
+		})
+		if child == nil {
+			return nil
+		}
+		if !g.lifecycle.Closed() {
+			child.Close(nil)
+		}
+		return child
+	})
+}
+
+func (g *Group) MustAdd(name string, lifecycle Lifecycle) *GroupLifecycleHolder {
+	return assert.Must(g.Add(name, lifecycle))
+}
+
+func (g *Group) getChildren(setLoaded bool) []*GroupLifecycleHolder {
+	return lock.LockGet(&g.childrenLock, func() (children []*GroupLifecycleHolder) {
+		for _, child := range g.children {
+			children = append(children, child)
+		}
+		if setLoaded {
+			g.loaded = true
+		}
+		return
+	})
+}
+
+func (g *Group) shutdownChildren(exclude map[*GroupLifecycleHolder]struct{}) {
+	excluded := func(child *GroupLifecycleHolder) bool {
+		if exclude != nil {
+			_, has := exclude[child]
+			return has
+		}
+		return false
+	}
+	children := g.getChildren(false)
+	futures := make([]ChanFuture[error], 0)
+	for _, child := range children {
+		if !excluded(child) && !child.removed.Load() {
+			future := make(ChanFuture[error], 1)
+			child.Close(future)
+			futures = append(futures, future)
+		}
+	}
+	for _, future := range futures {
+		<-future
+	}
+	lock.LockDo(&g.childrenLock, func() { g.loaded = false })
+}
+
+func (g *Group) handleRunningSignal(handleContext func(ctx groupLifecycleContext)) (closeAll bool) {
+	contexts := g.runningChannel.Pop()
+	var closedSet map[*GroupLifecycleHolder]struct{}
+	for _, ctx := range contexts {
+		child := ctx.Lifecycle
+		if handleContext != nil {
+			handleContext(ctx)
+		}
+		if child.removed.Load() {
+			continue
+		}
+		if ctx.err != nil {
+			if child.closeAllOnStartError.Load() {
+				closeAll = true
+			}
+			if closedSet == nil {
+				closedSet = make(map[*GroupLifecycleHolder]struct{})
+			}
+			closedSet[child] = struct{}{}
+		} else {
+			child.AddClosedFuture(groupLifecycleContext{
+				Lifecycle: child,
+				channel:   g.closedChannel,
+			})
+		}
+	}
+	if closeAll {
+		lock.LockDo(g.lifecycle, func() { g.lifecycle.ToClosing() })
+		g.shutdownChildren(closedSet)
+		return true
+	}
+	return false
+}
+
+func (g *Group) handleClosedSignal(handleContext func(ctx groupLifecycleContext)) (closeAll bool) {
+	contexts := g.closedChannel.Pop()
+	var closedSet map[*GroupLifecycleHolder]struct{}
+	for _, ctx := range contexts {
+		child := ctx.Lifecycle
+		if handleContext != nil {
+			handleContext(ctx)
+		}
+		if child.removed.Load() {
+			continue
+		}
+		if ctx.err != nil {
+			if child.closeAllOnExit.Load() || child.closeAllOnExitError.Load() {
+				closeAll = true
+			}
+		} else {
+			if child.closeAllOnExit.Load() {
+				closeAll = true
+			}
+		}
+		if closedSet == nil {
+			closedSet = make(map[*GroupLifecycleHolder]struct{})
+		}
+		closedSet[child] = struct{}{}
+	}
+	if closeAll {
+		lock.LockDo(g.lifecycle, func() { g.lifecycle.ToClosing() })
+		g.shutdownChildren(closedSet)
+		return true
+	}
+	return false
+}
+
+func (g *Group) start(_ Lifecycle, interrupter chan struct{}) (runFn InterruptedRunFunc, err error) {
+	children := g.getChildren(true)
+	for _, child := range children {
+		child.AddStartedFuture(groupLifecycleContext{
+			Lifecycle: child,
+			channel:   g.runningChannel,
+		})
+		child.Background()
+	}
+	childSet := make(map[*GroupLifecycleHolder]struct{})
+	for _, child := range children {
+		childSet[child] = struct{}{}
+	}
+	startedSet := make(map[*GroupLifecycleHolder]struct{})
+	childStarted := func(child *GroupLifecycleHolder) {
+		if _, in := childSet[child]; in {
+			startedSet[child] = struct{}{}
+		}
+	}
+	allStarted := func() bool { return len(startedSet) == len(childSet) }
+
+	for {
+		select {
+		case <-g.runningChannel.Signal():
+			if g.handleRunningSignal(func(ctx groupLifecycleContext) {
+				if child := ctx.Lifecycle; ctx.err == nil || !child.closeAllOnStartError.Load() || child.removed.Load() {
+					childStarted(child)
+				}
+			}) {
+				return nil, NewInterruptedError("生命周期组", "启动")
+			}
+			if allStarted() {
+				return g.run, nil
+			}
+		case <-g.closedChannel.Signal():
+			if g.handleClosedSignal(nil) {
+				return nil, NewInterruptedError("生命周期组", "启动")
+			}
+		case <-interrupter:
+			g.shutdownChildren(nil)
+			return nil, NewInterruptedError("生命周期组", "启动")
 		}
 	}
 }
 
-func (g *Group) close() error {
-	g.closeRequestChan <- struct{}{}
-	return nil
+func (g *Group) run(_ Lifecycle, interrupter chan struct{}) error {
+	for {
+		select {
+		case <-g.runningChannel.Signal():
+			if g.handleRunningSignal(nil) {
+				return nil
+			}
+		case <-g.closedChannel.Signal():
+			if g.handleClosedSignal(nil) {
+				return nil
+			}
+		case <-interrupter:
+			g.shutdownChildren(nil)
+			return nil
+		}
+	}
 }

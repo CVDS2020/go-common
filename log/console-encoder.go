@@ -3,7 +3,6 @@ package log
 import (
 	"fmt"
 	"gitee.com/sy_183/common/log/internal/bufferpool"
-	"gitee.com/sy_183/common/pool"
 	"io"
 	"sync"
 )
@@ -114,7 +113,7 @@ func (c consoleEncoder) Clone() Encoder {
 	}
 }
 
-func (c consoleEncoder) EncodeEntry(ent Entry, fields []Field) (*pool.Buffer, error) {
+func (c consoleEncoder) EncodeEntry(ent Entry, fields []Field) (*bufferpool.Buffer, error) {
 	line := bufferpool.Get()
 
 	// We don't want the entry's metadata to be quoted and escaped (if it's
@@ -176,7 +175,7 @@ func (c consoleEncoder) EncodeEntry(ent Entry, fields []Field) (*pool.Buffer, er
 	return line, nil
 }
 
-func (c consoleEncoder) writeContext(line *pool.Buffer, extra []Field) {
+func (c consoleEncoder) writeContext(line *bufferpool.Buffer, extra []Field) {
 	context := c.jsonEncoder.Clone().(*jsonEncoder)
 	defer func() {
 		// putJSONEncoder assumes the buffer is still used, but we write out the buffer so
@@ -197,7 +196,7 @@ func (c consoleEncoder) writeContext(line *pool.Buffer, extra []Field) {
 	line.AppendByte('}')
 }
 
-func (c consoleEncoder) addSeparatorIfNecessary(line *pool.Buffer) {
+func (c consoleEncoder) addSeparatorIfNecessary(line *bufferpool.Buffer) {
 	if line.Len() > 0 {
 		line.AppendString(c.ConsoleSeparator)
 	}

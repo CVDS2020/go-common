@@ -8,6 +8,10 @@ type Pointer[E any] struct {
 	elem        *E
 }
 
+func NewPointer[E any](init func() *E) *Pointer[E] {
+	return &Pointer[E]{Init: init}
+}
+
 func (c *Pointer[E]) Get() *E {
 	if c.elem != nil {
 		return c.elem

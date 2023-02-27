@@ -1,0 +1,34 @@
+package pool
+
+//type BufferPool struct {
+//	pool Pool[*Buffer]
+//}
+
+//func NewBufferPool(size uint, poolType string) BufferPool {
+//	p := BufferPool{}
+//	switch poolType {
+//	case "sync":
+//		p.pool = NewSyncPool(func(*SyncPool[*Buffer]) *Buffer { return p.newBuffer(size) })
+//	case "slice":
+//		p.pool = NewSlicePool(func(pool *SlicePool[*Buffer]) *Buffer { return p.newBuffer(size) })
+//	default:
+//		p.pool = NewSyncPool(func(*SyncPool[*Buffer]) *Buffer { return p.newBuffer(size) })
+//	}
+//	return p
+//}
+
+//func (p BufferPool) newBuffer(size uint) *Buffer {
+//	//DebugLogger.Error("make data", log.Uint("size", size))
+//	raw := make([]byte, size)
+//
+//	b := &Buffer{
+//		raw:    raw,
+//		pool:   p,
+//	}
+//	return NewBuffer(size, 4096)
+//}
+
+//func (p BufferPool) Get() *Buffer {
+//	b := p.pool.Get().Use()
+//	return b
+//}

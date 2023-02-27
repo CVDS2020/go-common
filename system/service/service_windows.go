@@ -24,11 +24,7 @@ type windowsService struct {
 
 	notifySignals  []os.Signal
 	signalCallback func(sig os.Signal) (exit bool)
-
-	errorCallback  func(err *Error)
 	exitCodeGetter func(err *Error) int
-	onStarted      func(s Service, l lifecycle.Lifecycle)
-	onClosed       func(s Service, l lifecycle.Lifecycle)
 }
 
 func New(name string, app lifecycle.Lifecycle, options ...Option) Service {
@@ -37,7 +33,6 @@ func New(name string, app lifecycle.Lifecycle, options ...Option) Service {
 		app:            app,
 		notifySignals:  DefaultNotifySignals,
 		signalCallback: DefaultSignalCallback,
-		errorCallback:  DefaultErrorCallback,
 		exitCodeGetter: DefaultExitCodeGetter,
 	}
 	for _, option := range options {
@@ -51,52 +46,30 @@ func (ws *windowsService) setSignalNotify(callback func(sig os.Signal) (exit boo
 	ws.notifySignals = sig
 }
 
-func (ws *windowsService) setErrorCallback(callback func(err *Error)) {
-	ws.errorCallback = callback
-}
-
 func (ws *windowsService) setExitCodeGetter(exitCodeGetter func(err *Error) int) {
 	ws.exitCodeGetter = exitCodeGetter
 }
 
-func (ws *windowsService) setOnStarted(callback func(s Service, l lifecycle.Lifecycle)) {
-	ws.onStarted = callback
-}
-
-func (ws *windowsService) setOnClosed(callback func(s Service, l lifecycle.Lifecycle)) {
-	ws.onClosed = callback
-}
-
-func (ws *windowsService) errorExit(typ ErrorType, err error) int {
-	e := &Error{Type: typ, Err: err}
-	ws.errorCallback(e)
-	ws.exitCode = ws.exitCodeGetter(e)
-	return ws.exitCode
-}
-
 func (ws *windowsService) Execute(args []string, r <-chan svc.ChangeRequest, s chan<- svc.Status) (svcSpecificEC bool, exitCode uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
+
+	go ws.app.Run()
 	s <- svc.Status{State: svc.StartPending}
 
-	if err := ws.app.Start(); err != nil {
-		return true, uint32(ws.errorExit(StartError, err))
-	}
-	future := ws.app.AddClosedFuture(make(chan error, 1))
-	if ws.onStarted != nil {
-		ws.onStarted(ws, ws.app)
-	}
-	defer func() {
-		if ws.onClosed != nil {
-			ws.onClosed(ws, ws.app)
-		}
-	}()
-	s <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+	startedWaiter := ws.app.StartedWaiter()
+	closedWaiter := make(lifecycle.ChanFuture[error], 1)
 
 	for {
 		select {
-		case err := <-future:
+		case err := <-startedWaiter:
 			if err != nil {
-				return true, uint32(ws.errorExit(ExitError, err))
+				return true, uint32(ws.exitCodeGetter(&Error{Type: StartError, Err: err}))
+			}
+			ws.app.AddClosedFuture(closedWaiter)
+			s <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+		case err := <-closedWaiter:
+			if err != nil {
+				return true, uint32(ws.exitCodeGetter(&Error{Type: ExitError, Err: err}))
 			}
 			return false, 0
 		case c := <-r:
@@ -105,10 +78,7 @@ func (ws *windowsService) Execute(args []string, r <-chan svc.ChangeRequest, s c
 				s <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
 				s <- svc.Status{State: svc.StopPending}
-				if err := ws.app.Close(nil); err != nil {
-					ws.errorCallback(&Error{Type: StopError, Err: err})
-				}
-				continue
+				ws.app.Close(nil)
 			}
 		}
 	}
@@ -117,39 +87,31 @@ func (ws *windowsService) Execute(args []string, r <-chan svc.ChangeRequest, s c
 func (ws *windowsService) Run() int {
 	if isWindowsService {
 		if err := svc.Run(ws.name, ws); err != nil {
-			return ws.errorExit(ServiceError, err)
+			return ws.exitCodeGetter(&Error{Type: ServiceError, Err: err})
 		}
 		return ws.exitCode
 	}
+	go ws.app.Run()
 
-	if err := ws.app.Start(); err != nil {
-		return ws.errorExit(StartError, err)
-	}
-	closedFuture := ws.app.AddClosedFuture(make(chan error, 1))
-	if ws.onStarted != nil {
-		ws.onStarted(ws, ws.app)
-	}
-	defer func() {
-		if ws.onClosed != nil {
-			ws.onClosed(ws, ws.app)
-		}
-	}()
 	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, ws.notifySignals...)
 
+	startedWaiter := ws.app.StartedWaiter()
+	closedWaiter := make(lifecycle.ChanFuture[error], 1)
 	for {
 		select {
 		case sig := <-sigChan:
 			if ws.signalCallback(sig) {
-				if err := ws.app.Close(nil); err != nil {
-					ws.errorCallback(&Error{Type: StopError, Err: err})
-				}
+				ws.app.Close(nil)
 			}
-			continue
-
-		case err := <-closedFuture:
+		case err := <-startedWaiter:
 			if err != nil {
-				return ws.errorExit(ExitError, err)
+				return ws.exitCodeGetter(&Error{Type: StartError, Err: err})
+			}
+			ws.app.AddClosedFuture(closedWaiter)
+		case err := <-closedWaiter:
+			if err != nil {
+				return ws.exitCodeGetter(&Error{Type: ExitError, Err: err})
 			}
 			return 0
 		}

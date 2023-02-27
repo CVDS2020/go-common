@@ -12,7 +12,7 @@ import (
 
 type app struct {
 	lifecycle.Lifecycle
-	runner     *lifecycle.DefaultRunner
+	runner     *lifecycle.DefaultLifecycle
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	logger     *log.Logger
@@ -21,7 +21,8 @@ type app struct {
 func newApp() *app {
 	a := new(app)
 	a.ctx, a.cancelFunc = context.WithTimeout(context.Background(), time.Hour)
-	a.runner, a.Lifecycle = lifecycle.New("app", lifecycle.Core(a.start, a.run, a.close))
+	a.runner = lifecycle.NewWithRun(a.start, a.run, a.close)
+	a.Lifecycle = a.runner
 	a.logger = assert.Must(log.Config{
 		Level: log.NewAtomicLevelAt(log.InfoLevel),
 		Encoder: log.NewConsoleEncoder(log.ConsoleEncoderConfig{
@@ -38,21 +39,21 @@ func newApp() *app {
 	return a
 }
 
-func (a *app) start() error {
+func (a *app) start(lifecycle.Lifecycle) error {
 	a.logger.Info("app is starting...")
 	time.Sleep(time.Second)
 	a.logger.Info("app is running...")
 	return nil
 }
 
-func (a *app) run() error {
+func (a *app) run(lifecycle.Lifecycle) error {
 	<-a.ctx.Done()
 	time.Sleep(time.Second)
 	a.logger.Info("app is stopped")
 	return nil
 }
 
-func (a *app) close() error {
+func (a *app) close(lifecycle.Lifecycle) error {
 	a.logger.Info("app is stopping...")
 	a.cancelFunc()
 	return nil

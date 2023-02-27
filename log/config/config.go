@@ -73,8 +73,8 @@ type ConsoleEncoder struct {
 	DisableLevelP      *bool  `json:"disable-level" yaml:"disable-level"`
 	DisableTimeP       *bool  `json:"disable-time" yaml:"disable-time"`
 	DisableNameP       *bool  `json:"disable-name" yaml:"disable-name"`
-	DisableCallerP     *bool  `json:"disable-caller" yaml:"disable-caller"`
-	DisableFunctionP   *bool  `json:"disable-function" yaml:"disable-function"`
+	DisableCallerP     *bool  `json:"disable-caller" yaml:"disable-caller" default:"true"`
+	DisableFunctionP   *bool  `json:"disable-function" yaml:"disable-function" default:"true"`
 	DisableStacktraceP *bool  `json:"disable-stacktrace" yaml:"disable-stacktrace" default:"true"`
 	SkipLineEndingP    *bool  `json:"skip-line-ending" yaml:"skip-line-ending"`
 	LineEnding         string `json:"line-ending" yaml:"line-ending"`
@@ -280,6 +280,10 @@ func (c *LoggerConfig) Build() (*log.Logger, error) {
 	return logConfig.Build()
 }
 
+func (c *LoggerConfig) MustBuild() *log.Logger {
+	return assert.Must(c.Build())
+}
+
 type Config struct {
 	LoggerConfig `yaml:",inline"`
 	Configs      map[string]*LoggerConfig `yaml:",inline" json:"configs" default:"{}"`
@@ -368,6 +372,7 @@ func (c *Config) Build(modules ...string) (*log.Logger, error) {
 	for _, module := range modules {
 		if c, has := c.Configs[module]; has {
 			conf = c
+			break
 		}
 	}
 	// logger config not found, use default
@@ -379,9 +384,5 @@ func (c *Config) Build(modules ...string) (*log.Logger, error) {
 }
 
 func (c *Config) MustBuild(modules ...string) *log.Logger {
-	logger, err := c.Build(modules...)
-	if err != nil {
-		return assert.Must(c.Build())
-	}
-	return logger
+	return assert.Must(c.Build(modules...))
 }

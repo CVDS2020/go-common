@@ -2,7 +2,6 @@ package log
 
 import (
 	"gitee.com/sy_183/common/log/internal/bufferpool"
-	"gitee.com/sy_183/common/pool"
 	"runtime"
 	"sync"
 )
@@ -120,12 +119,12 @@ func takeStacktrace(skip int) string {
 
 // stackFormatter formats a stack trace into a readable string representation.
 type stackFormatter struct {
-	b        *pool.Buffer
+	b        *bufferpool.Buffer
 	nonEmpty bool // whehther we've written at least one frame already
 }
 
 // newStackFormatter builds a new stackFormatter.
-func newStackFormatter(b *pool.Buffer) stackFormatter {
+func newStackFormatter(b *bufferpool.Buffer) stackFormatter {
 	return stackFormatter{b: b}
 }
 

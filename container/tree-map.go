@@ -624,14 +624,14 @@ type OrderedKeyTreeMap[K generic.Ordered, V any] struct {
 	TreeMap[K, V]
 }
 
-func NewOrderedKeyTreeMap[K generic.Ordered, V any]() *OrderedKeyTreeMap[K, V] {
-	return &OrderedKeyTreeMap[K, V]{TreeMap: TreeMap[K, V]{cpr: OrderedCompare[K]}}
+func NewOrderedKeyTreeMap[K generic.Ordered, V any]() *TreeMap[K, V] {
+	return NewTreeMap[K, V](OrderedCompare[K])
 }
 
 type ComparableKeyTreeMap[K Comparable, V any] struct {
 	TreeMap[K, V]
 }
 
-func NewComparableKeyTreeMap[K Comparable, V any]() *ComparableKeyTreeMap[K, V] {
-	return &ComparableKeyTreeMap[K, V]{}
+func NewComparableKeyTreeMap[K Comparable, V any]() *TreeMap[K, V] {
+	return NewTreeMap[K, V](nil)
 }

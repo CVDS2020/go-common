@@ -1,6 +1,7 @@
 package log
 
 import (
+	"errors"
 	"fmt"
 	"gitee.com/sy_183/common/log/internal/bufferpool"
 	"io/ioutil"
@@ -114,15 +115,21 @@ func (log *Logger) Sugar() *SugaredLogger {
 
 // Named adds a new path segment to the logger's name. Segments are joined by
 // periods. By default, Loggers are unnamed.
-func (log *Logger) Named(s string) *Logger {
-	if s == "" {
+func (log *Logger) Named(name string) *Logger {
+	l := log.clone()
+	l.name = name
+	return l
+}
+
+func (log *Logger) SubNamed(name string) *Logger {
+	if name == "" {
 		return log
 	}
 	l := log.clone()
 	if log.name == "" {
-		l.name = s
+		l.name = name
 	} else {
-		l.name = strings.Join([]string{l.name, s}, ".")
+		l.name = strings.Join([]string{l.name, name}, ".")
 	}
 	return l
 }
@@ -195,6 +202,13 @@ func (log *Logger) ErrorWith(msg string, err error, fields ...Field) error {
 		ce.Write(append([]Field{Error(err)}, fields...)...)
 	}
 	return err
+}
+
+func (log *Logger) ErrorMsg(err string, fields ...Field) error {
+	if ce := log.check(ErrorLevel, err); ce != nil {
+		ce.Write(fields...)
+	}
+	return errors.New(err)
 }
 
 // DPanic logs a message at DPanicLevel. The message includes any fields
