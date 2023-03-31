@@ -1,6 +1,7 @@
 package unit
 
 import (
+	"bytes"
 	"fmt"
 	"gitee.com/sy_183/common/uns"
 	"gopkg.in/yaml.v3"
@@ -73,6 +74,10 @@ func (s Size) Float64() float64 {
 }
 
 func (s *Size) UnmarshalText(text []byte) error {
+	text = bytes.TrimSpace(text)
+	if len(text) == 0 {
+		return nil
+	}
 	ns := uns.BytesToString(text)
 	nsu := strings.ToUpper(ns)
 	us, usu := "", ""

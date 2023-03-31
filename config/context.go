@@ -1,10 +1,11 @@
 package config
 
 import (
+	"gitee.com/sy_183/common/container"
+	"gitee.com/sy_183/common/lock"
 	"gitee.com/sy_183/common/log"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
 // An Option configures a Context.
@@ -29,13 +30,13 @@ func LoggerErrorCallback(logger *log.Logger) func(err *Error) {
 	return func(err *Error) {
 		switch err.Type {
 		case ParseError:
-			logger.Fatal("load config error", log.Error(err))
+			logger.Fatal("加载配置失败", log.Error(err))
 		case CheckError:
-			logger.Fatal("check config error", log.Error(err))
+			logger.Fatal("检查配置失败", log.Error(err))
 		case ReloadParseError:
-			logger.ErrorWith("reload config error", err)
+			logger.ErrorWith("重新加载配置失败", err)
 		case ReloadCheckError:
-			logger.ErrorWith("reload check config error", err)
+			logger.ErrorWith("重新加载配置检查失败", err)
 		}
 	}
 }
@@ -76,74 +77,92 @@ func SetFilePrefix[C any](prefix string, types ...Type) Option[C] {
 	})
 }
 
+type (
+	OnConfigReloaded[C any]    func(oc, nc *C)
+	ConfigReloadChecker[C any] func(oc, nc *C) error
+)
+
 type Context[C any] struct {
 	Parser
 
-	config      unsafe.Pointer
+	config      atomic.Pointer[C]
 	initializer sync.Once
 
 	errorCallback func(err *Error)
 
-	configReloadedCallbacks       []func(oc, nc *C)
+	configReloadedCallbackId atomic.Uint64
+	configReloadCheckerId    atomic.Uint64
+
+	configReloadedCallbacks       *container.LinkedMap[uint64, OnConfigReloaded[C]]
 	configReloadedCallbacksLocker sync.Mutex
-	configReloadCheckers          []func(oc, nc *C) error
+	configReloadCheckers          *container.LinkedMap[uint64, ConfigReloadChecker[C]]
 	configReloadCheckersLocker    sync.Mutex
 }
 
 func NewContext[C any](options ...Option[C]) *Context[C] {
-	ctx := new(Context[C])
+	ctx := &Context[C]{
+		configReloadedCallbacks: container.NewLinkedMap[uint64, OnConfigReloaded[C]](0),
+		configReloadCheckers:    container.NewLinkedMap[uint64, ConfigReloadChecker[C]](0),
+	}
 	for _, option := range options {
 		option.apply(ctx)
 	}
 	return ctx
 }
 
-func (c *Context[C]) store(config *C) {
-	atomic.StorePointer(&c.config, unsafe.Pointer(config))
+func (c *Context[C]) RegisterConfigReloadedCallback(callback OnConfigReloaded[C]) uint64 {
+	return lock.LockGet(&c.configReloadedCallbacksLocker, func() uint64 {
+		id := c.configReloadedCallbackId.Add(1)
+		c.configReloadedCallbacks.PutIfAbsent(id, callback)
+		return id
+	})
 }
 
-func (c *Context[C]) load() *C {
-	return (*C)(atomic.LoadPointer(&c.config))
+func (c *Context[C]) UnregisterConfigReloadedCallback(id uint64) {
+	lock.LockDo(&c.configReloadedCallbacksLocker, func() {
+		c.configReloadedCallbacks.Remove(id)
+	})
 }
 
-func (c *Context[C]) RegisterConfigReloadedCallback(callback func(oc, nc *C)) {
-	c.configReloadedCallbacksLocker.Lock()
-	c.configReloadedCallbacks = append(c.configReloadedCallbacks, callback)
-	c.configReloadedCallbacksLocker.Unlock()
+func (c *Context[C]) RegisterConfigReloadChecker(checker ConfigReloadChecker[C]) uint64 {
+	return lock.LockGet(&c.configReloadCheckersLocker, func() uint64 {
+		id := c.configReloadCheckerId.Add(1)
+		c.configReloadCheckers.PutIfAbsent(id, checker)
+		return id
+	})
 }
 
-func (c *Context[C]) RegisterConfigReloadChecker(checker func(oc, nc *C) error) {
-	c.configReloadCheckersLocker.Lock()
-	c.configReloadCheckers = append(c.configReloadCheckers, checker)
-	c.configReloadCheckersLocker.Unlock()
+func (c *Context[C]) UnregisterConfigReloadChecker(id uint64) {
+	lock.LockDo(&c.configReloadCheckersLocker, func() {
+		c.configReloadCheckers.Remove(id)
+	})
 }
 
 func (c *Context[C]) configReloaded(oc, nc *C) {
-	c.configReloadedCallbacksLocker.Lock()
-	for _, callback := range c.configReloadedCallbacks {
-		callback(oc, nc)
-	}
-	c.configReloadedCallbacksLocker.Unlock()
+	lock.LockDo(&c.configReloadedCallbacksLocker, func() {
+		for entry := c.configReloadedCallbacks.FirstEntry(); entry != nil; entry = entry.Next() {
+			entry.Value()(oc, nc)
+		}
+	})
 }
 
 func (c *Context[C]) configReloadCheck(oc, nc *C) error {
-	c.configReloadCheckersLocker.Lock()
-	defer c.configReloadCheckersLocker.Unlock()
-	for _, checker := range c.configReloadCheckers {
-		if err := checker(oc, nc); err != nil {
-			return err
+	return lock.LockGet(&c.configReloadCheckersLocker, func() error {
+		for entry := c.configReloadCheckers.FirstEntry(); entry != nil; entry = entry.Next() {
+			if err := entry.Value()(oc, nc); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 func (c *Context[C]) ConfigP() *C {
-	if cfg := c.load(); cfg != nil {
-
+	if cfg := c.config.Load(); cfg != nil {
 		return cfg
 	}
 	c.initializer.Do(c.initConfig)
-	return c.load()
+	return c.config.Load()
 }
 
 func (c *Context[C]) Config() C {
@@ -164,7 +183,7 @@ func (c *Context[C]) initConfig() {
 		}
 		panic(err)
 	}
-	c.store(nc)
+	c.config.Store(nc)
 	c.configReloaded(nil, nc)
 }
 
@@ -183,6 +202,6 @@ func (c *Context[C]) ReloadConfig() {
 		}
 		return
 	}
-	c.store(nc)
+	c.config.Store(nc)
 	c.configReloaded(oc, nc)
 }

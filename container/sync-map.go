@@ -53,3 +53,19 @@ func (s *SyncMap[K, V]) Map() map[K]V {
 	})
 	return m
 }
+
+func (s *SyncMap[K, V]) Keys() (keys []K) {
+	s.Range(func(key K, value V) bool {
+		keys = append(keys, key)
+		return true
+	})
+	return
+}
+
+func (s *SyncMap[K, V]) Values() (values []V) {
+	s.Range(func(key K, value V) bool {
+		values = append(values, value)
+		return true
+	})
+	return
+}

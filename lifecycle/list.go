@@ -161,6 +161,12 @@ func (l *List) handleClosedSignal() (closeAll bool) {
 }
 
 func (l *List) start(_ Lifecycle, interrupter chan struct{}) (runFn InterruptedRunFunc, err error) {
+	defer func() {
+		if err != nil {
+			l.reset()
+		}
+	}()
+
 next:
 	for i, child := range l.children {
 		future := make(ChanFuture[error], 1)
@@ -198,6 +204,7 @@ next:
 }
 
 func (l *List) run(_ Lifecycle, interrupter chan struct{}) error {
+	defer l.reset()
 	for {
 		select {
 		case <-l.closedChannel.Signal():
@@ -209,4 +216,9 @@ func (l *List) run(_ Lifecycle, interrupter chan struct{}) error {
 			return nil
 		}
 	}
+}
+
+func (l *List) reset() {
+	l.started = 0
+	l.closedChannel = newChildLifecycleChannel[*ListLifecycleHolder]()
 }

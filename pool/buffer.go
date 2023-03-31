@@ -1,16 +1,11 @@
 package pool
 
-import (
-	"fmt"
-	"sync/atomic"
-)
-
 type Buffer struct {
 	raw        []byte
 	dataPool   []Data
 	allocated  uint
 	reversed   uint
-	ref        atomic.Int64
+	ref        AtomicRef
 	onReleased func(*Buffer)
 }
 
@@ -34,11 +29,19 @@ func (b *Buffer) Remain() uint {
 	return uint(len(b.raw)) - b.allocated
 }
 
+func (b *Buffer) Used() []byte {
+	return b.raw[:b.allocated]
+}
+
+func (b *Buffer) Unused() []byte {
+	return b.raw[b.allocated:]
+}
+
 func (b *Buffer) Get() []byte {
 	if b.Remain() < b.reversed {
 		return nil
 	}
-	return b.raw[b.allocated:]
+	return b.Unused()
 }
 
 func (b *Buffer) Alloc(size uint) *Data {
@@ -60,24 +63,20 @@ func (b *Buffer) Alloc(size uint) *Data {
 	return d
 }
 
-func (b *Buffer) Release() {
-	c := b.ref.Add(-1)
-	if c == 0 {
+func (b *Buffer) Release() bool {
+	if b.ref.Release() {
 		b.allocated = 0
 		b.dataPool = b.dataPool[:0]
 		if onReleased := b.onReleased; onReleased != nil {
 			onReleased(b)
 		}
-	} else if c < 0 {
-		panic(fmt.Errorf("重复释放缓冲区(%p), 缓冲区引用计数[%d -> %d]", b, c+1, c))
+		return true
 	}
+	return false
 }
 
 func (b *Buffer) AddRef() {
-	c := b.ref.Add(1)
-	if c <= 0 {
-		panic(fmt.Errorf("无效的缓冲区(%p)引用计数[%d -> %d]", b, c-1, c))
-	}
+	b.ref.AddRef()
 }
 
 func (b *Buffer) Use() *Buffer {

@@ -1,13 +1,14 @@
 package config
 
 import (
-	"gitee.com/sy_183/common/errors"
+	"fmt"
+	"gitee.com/sy_183/common/unit"
 	"os"
 )
 
 const MaxConfigFileSize = 32 * 1024 * 1024
 
-var ConfigSizeTooLargeError = errors.New("config file size too large")
+var ConfigSizeTooLargeError = fmt.Errorf("配置文件大小过大，超过限定大小(%s)", unit.Size(MaxConfigFileSize))
 
 type fileParser struct {
 	path string
@@ -20,7 +21,7 @@ func (p *fileParser) Unmarshal(c interface{}) error {
 		return err
 	}
 	if info.Size() > MaxConfigFileSize {
-		return errors.New("config file size too large")
+		return ConfigSizeTooLargeError
 	}
 	data, err := os.ReadFile(p.path)
 	if err != nil {

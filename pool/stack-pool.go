@@ -1,14 +1,23 @@
 package pool
 
-import "sync"
+import (
+	"gitee.com/sy_183/common/option"
+	"sync"
+)
 
 type StackPool[O any] struct {
 	stack []O
 	mu    sync.Mutex
 }
 
-func NewStackPool[O any](new func(p *StackPool[O]) O, size uint) *StackPool[O] {
+func NewStackPool[O any](new func(p *StackPool[O]) O, size uint, options ...option.AnyOption) *StackPool[O] {
+	if size == 0 {
+		size = 1
+	}
 	p := &StackPool[O]{stack: make([]O, size)}
+	for _, opt := range options {
+		opt.Apply(p)
+	}
 	for i := range p.stack {
 		p.stack[i] = new(p)
 	}
@@ -16,10 +25,10 @@ func NewStackPool[O any](new func(p *StackPool[O]) O, size uint) *StackPool[O] {
 }
 
 func StackPoolProvider[O any](size uint) PoolProvider[O] {
-	return func(new func(p Pool[O]) O) Pool[O] {
+	return func(new func(p Pool[O]) O, options ...option.AnyOption) Pool[O] {
 		return NewStackPool(func(p *StackPool[O]) O {
 			return new(p)
-		}, size)
+		}, size, options...)
 	}
 }
 

@@ -144,6 +144,29 @@ func (q *Queue[E]) PopTail() (e E, ok bool) {
 	return
 }
 
+func (q *Queue[E]) PopTo(es []E) (n int) {
+	end := len(es)
+	if end > q.len {
+		end = q.len
+	}
+	if end += q.head; end > q.cap {
+		end -= q.cap
+		n = copy(es, q.raw[q.head:])
+		n += copy(es[n:], q.raw[:end])
+	} else {
+		n = copy(es, q.raw[q.head:end])
+	}
+	q.len -= n
+	q.head = end
+	return
+}
+
+func (q *Queue[E]) PopAll() []E {
+	es := make([]E, q.len)
+	q.PopTo(es)
+	return es
+}
+
 func (q *Queue[E]) Get(i int) E {
 	return *q.Pointer(i)
 }
@@ -214,7 +237,6 @@ func (q *Queue[E]) Swap(i, j int) {
 }
 
 func (q *Queue[E]) Clear() {
-	q.head = 0
-	q.tail = 0
+	q.head = q.tail
 	q.len = 0
 }

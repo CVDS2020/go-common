@@ -7,6 +7,6 @@ import (
 )
 
 func TestDynamicDataPool(t *testing.T) {
-	pool := NewDynamicDataPoolWithExp(64*unit.KiBiByte, unit.MeBiByte, "sync")
+	pool := NewDynamicDataPoolWithExp(64*unit.KiBiByte, unit.MeBiByte, ProvideSlicePool[*Data])
 	fmt.Println(pool.pools)
 }

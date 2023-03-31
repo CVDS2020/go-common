@@ -107,7 +107,7 @@ func (s *SGR) Codes() []string {
 	if s.Flag.Has(Reset) {
 		return []string{ResetCode}
 	}
-	return slice.Join(s.CachedCodes(), s.FgColorCodes(), s.BgColorCodes(), s.UlColorCodes())
+	return slice.JoinNew(s.CachedCodes(), s.FgColorCodes(), s.BgColorCodes(), s.UlColorCodes())
 }
 
 func (s *SGR) CSI() string {

@@ -2,18 +2,18 @@ package slice
 
 import _ "unsafe"
 
-//go:linkname goPanicIndex runtime.goPanicIndex
-func goPanicIndex(x int, y int)
+//go:linkname GoPanicIndex runtime.goPanicIndex
+func GoPanicIndex(x int, y int)
 
-//go:linkname goPanicSliceAlen runtime.goPanicSliceAlen
-func goPanicSliceAlen(x int, y int)
+//go:linkname GoPanicSliceAlen runtime.goPanicSliceAlen
+func GoPanicSliceAlen(x int, y int)
 
-//go:linkname goPanicSliceB runtime.goPanicSliceB
-func goPanicSliceB(x int, y int)
+//go:linkname GoPanicSliceB runtime.goPanicSliceB
+func GoPanicSliceB(x int, y int)
 
 type Chunks[E any] [][]E
 
-func join[E any](ss [][]E) []E {
+func Join[E any](ss [][]E) []E {
 	switch len(ss) {
 	case 0:
 		return nil
@@ -36,7 +36,7 @@ func join[E any](ss [][]E) []E {
 	}
 }
 
-func join1N[E any](s []E, ss [][]E) []E {
+func Join1N[E any](s []E, ss [][]E) []E {
 	switch len(ss) {
 	case 0:
 		return s
@@ -56,7 +56,7 @@ func join1N[E any](s []E, ss [][]E) []E {
 	}
 }
 
-func joinN1[E any](ss [][]E, s []E) []E {
+func JoinN1[E any](ss [][]E, s []E) []E {
 	switch len(ss) {
 	case 0:
 		return s
@@ -78,11 +78,11 @@ func joinN1[E any](ss [][]E, s []E) []E {
 	}
 }
 
-func join11[E any](s1, s2 []E) []E {
+func Join11[E any](s1, s2 []E) []E {
 	return append(s1[:len(s1):len(s1)], s2...)
 }
 
-func join1N1[E any](s1 []E, ss [][]E, s2 []E) []E {
+func Join1N1[E any](s1 []E, ss [][]E, s2 []E) []E {
 	switch len(ss) {
 	case 0:
 		return append(s1[:len(s1):len(s1)], s2...)
@@ -101,7 +101,7 @@ func join1N1[E any](s1 []E, ss [][]E, s2 []E) []E {
 	}
 }
 
-func join111[E any](s1, s2, s3 []E) []E {
+func Join111[E any](s1, s2, s3 []E) []E {
 	rs := make([]E, len(s1)+len(s2)+len(s3))
 	sp := copy(rs, s1)
 	sp += copy(rs[sp:], s2)
@@ -109,7 +109,7 @@ func join111[E any](s1, s2, s3 []E) []E {
 	return rs
 }
 
-func (cs Chunks[E]) locate(index int) (int, int) {
+func Locate[E any](cs [][]E, index int) (int, int) {
 	i := index
 	for j, chunk := range cs {
 		if i < len(chunk) {
@@ -117,15 +117,15 @@ func (cs Chunks[E]) locate(index int) (int, int) {
 		}
 		i -= len(chunk)
 	}
-	goPanicIndex(index, index-i)
+	GoPanicIndex(index, index-i)
 	return 0, 0
 }
 
-func (cs Chunks[E]) locateStart(index int) (int, int) {
+func LocateStart[E any](cs [][]E, start int) (int, int) {
 	if len(cs) == 0 {
 		return 0, 0
 	}
-	i := index
+	i := start
 	for j, chunk := range cs {
 		if i < len(chunk) {
 			return j, i
@@ -133,12 +133,12 @@ func (cs Chunks[E]) locateStart(index int) (int, int) {
 		i -= len(chunk)
 	}
 	if i > 0 {
-		goPanicSliceAlen(index, index-i)
+		GoPanicSliceAlen(start, start-i)
 	}
 	return len(cs) - 1, len(cs[len(cs)-1])
 }
 
-func (cs Chunks[E]) locateEnd(end int) (int, int) {
+func LocateEnd[E any](cs [][]E, end int) (int, int) {
 	if len(cs) == 0 {
 		return 0, 0
 	}
@@ -149,8 +149,34 @@ func (cs Chunks[E]) locateEnd(end int) (int, int) {
 		}
 		i -= len(chunk)
 	}
-	goPanicSliceAlen(end, end-i)
+	GoPanicSliceAlen(end, end-i)
 	return 0, 0
+}
+
+func TrimChunks[E any](chunks [][]E) [][]E {
+	return TrimChunksEnd(TrimChunksStart(chunks))
+}
+
+func TrimChunksStart[E any](chunks [][]E) [][]E {
+	for len(chunks) > 0 {
+		if len(chunks[0]) == 0 {
+			chunks = chunks[1:]
+		} else {
+			break
+		}
+	}
+	return chunks
+}
+
+func TrimChunksEnd[E any](chunks [][]E) [][]E {
+	for i := len(chunks) - 1; i >= 0; i-- {
+		if len(chunks[i]) == 0 {
+			chunks = chunks[:i]
+		} else {
+			break
+		}
+	}
+	return chunks
 }
 
 func (cs Chunks[E]) Len() int {
@@ -162,12 +188,12 @@ func (cs Chunks[E]) Len() int {
 }
 
 func (cs Chunks[E]) Get(i int) E {
-	x, y := cs.locate(i)
+	x, y := Locate(cs, i)
 	return cs[x][y]
 }
 
 func (cs Chunks[E]) Pointer(i int) *E {
-	x, y := cs.locate(i)
+	x, y := Locate(cs, i)
 	return &cs[x][y]
 }
 
@@ -206,43 +232,29 @@ func (cs Chunks[E]) LastPointer() *E {
 }
 
 func (cs Chunks[E]) TrimStart() Chunks[E] {
-	for len(cs) > 0 {
-		if len(cs[0]) == 0 {
-			cs = cs[1:]
-		} else {
-			break
-		}
-	}
-	return cs
+	return TrimChunksStart(cs)
 }
 
 func (cs Chunks[E]) TrimEnd() Chunks[E] {
-	for i := len(cs) - 1; i >= 0; i-- {
-		if len(cs[i]) == 0 {
-			cs = cs[:i]
-		} else {
-			break
-		}
-	}
-	return cs
+	return TrimChunksEnd(cs)
 }
 
 func (cs Chunks[E]) Trim() Chunks[E] {
-	return cs.TrimStart().TrimEnd()
+	return TrimChunks(cs)
 }
 
 func (cs Chunks[E]) sliceFrom(sx, sy int) []E {
 	if len(cs) == 0 {
 		return nil
 	}
-	return join1N(cs[sx][sy:], cs[sx+1:])
+	return Join1N(cs[sx][sy:], cs[sx+1:])
 }
 
 func (cs Chunks[E]) sliceTo(ex, ey int) []E {
 	if len(cs) == 0 {
 		return nil
 	}
-	return joinN1(cs[:ex], cs[ex][:ey])
+	return JoinN1(cs[:ex], cs[ex][:ey])
 }
 
 func (cs Chunks[E]) slice(sx, sy, ex, ey int) []E {
@@ -255,30 +267,30 @@ func (cs Chunks[E]) slice(sx, sy, ex, ey int) []E {
 	case sx == ex:
 		return cs[sx][sy:ey]
 	case sx == ex-1:
-		return join11(cs[sx][sy:], cs[ex][:ey])
+		return Join11(cs[sx][sy:], cs[ex][:ey])
 	default:
-		return join1N1(cs[sx][sy:], cs[sx+1:ex], cs[ex][:ey])
+		return Join1N1(cs[sx][sy:], cs[sx+1:ex], cs[ex][:ey])
 	}
 }
 
 func (cs Chunks[E]) Slice(start, end int) []E {
 	if start >= 0 && end >= 0 {
 		if start > end {
-			goPanicSliceB(start, end)
+			GoPanicSliceB(start, end)
 		}
 		cs = cs.TrimStart().TrimEnd()
-		sx, sy := cs.locateStart(start)
-		ex, ey := cs.locateEnd(end)
+		sx, sy := LocateStart(cs, start)
+		ex, ey := LocateEnd(cs, end)
 		return cs.slice(sx, sy, ex, ey)
 	}
 	cs = cs.TrimStart().TrimEnd()
 	switch {
 	case start < 0 && end < 0:
-		return join(cs)
+		return Join(cs)
 	case start < 0:
-		return cs.sliceTo(cs.locateEnd(end))
+		return cs.sliceTo(LocateEnd(cs, end))
 	default:
-		return cs.sliceFrom(cs.locateStart(start))
+		return cs.sliceFrom(LocateStart(cs, start))
 	}
 }
 
@@ -289,7 +301,7 @@ func (cs Chunks[E]) cutFrom(sx, sy int) Chunks[E] {
 	if sy == 0 {
 		return cs[sx:]
 	}
-	return join11(Chunks[E]{cs[sx][sy:]}, cs[sx+1:])
+	return Join11(Chunks[E]{cs[sx][sy:]}, cs[sx+1:])
 }
 
 func (cs Chunks[E]) cutTo(ex, ey int) Chunks[E] {
@@ -299,7 +311,7 @@ func (cs Chunks[E]) cutTo(ex, ey int) Chunks[E] {
 	if ey == len(cs[ex]) {
 		return cs[:ex+1]
 	}
-	return join11(cs[:ex], Chunks[E]{cs[ex][:ey]})
+	return Join11(cs[:ex], Chunks[E]{cs[ex][:ey]})
 }
 
 func (cs Chunks[E]) cut(sx, sy, ex, ey int) Chunks[E] {
@@ -317,18 +329,18 @@ func (cs Chunks[E]) cut(sx, sy, ex, ey int) Chunks[E] {
 		if sy == 0 && ey == len(cs[ex]) {
 			return cs[sx : ex+1]
 		}
-		return join111(Chunks[E]{cs[sx][sy:]}, cs[sx+1:ex], Chunks[E]{cs[ex][:ey]})
+		return Join111(Chunks[E]{cs[sx][sy:]}, cs[sx+1:ex], Chunks[E]{cs[ex][:ey]})
 	}
 }
 
 func (cs Chunks[E]) Cut(start, end int) Chunks[E] {
 	if start >= 0 && end >= 0 {
 		if start > end {
-			goPanicSliceB(start, end)
+			GoPanicSliceB(start, end)
 		}
 		cs = cs.TrimStart().TrimEnd()
-		sx, sy := cs.locateStart(start)
-		ex, ey := cs.locateEnd(end)
+		sx, sy := LocateStart(cs, start)
+		ex, ey := LocateEnd(cs, end)
 		return cs.cut(sx, sy, ex, ey)
 	}
 	cs = cs.TrimStart().TrimEnd()
@@ -336,9 +348,9 @@ func (cs Chunks[E]) Cut(start, end int) Chunks[E] {
 	case start < 0 && end < 0:
 		return cs
 	case start < 0:
-		return cs.cutTo(cs.locateEnd(end))
+		return cs.cutTo(LocateEnd(cs, end))
 	default:
-		return cs.cutFrom(cs.locateStart(start))
+		return cs.cutFrom(LocateStart(cs, start))
 	}
 }
 
@@ -354,7 +366,7 @@ func (cs Chunks[E]) GetAndSet(i int, e E) (old E) {
 }
 
 func (cs Chunks[E]) Swap(i, j int) {
-	x1, y1 := cs.locate(i)
-	x2, y2 := cs.locate(j)
+	x1, y1 := Locate(cs, i)
+	x2, y2 := Locate(cs, j)
 	cs[x1][y1], cs[x2][y2] = cs[x2][y2], cs[x1][y1]
 }

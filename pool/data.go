@@ -3,9 +3,7 @@ package pool
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"gitee.com/sy_183/common/uns"
-	"sync/atomic"
 )
 
 type Data struct {
@@ -181,10 +179,11 @@ func (d *Data) String() string {
 	return uns.BytesToString(d.Data)
 }
 
-func (d *Data) Release() {
+func (d *Data) Release() bool {
 	if d.Reference != nil {
-		d.Reference.Release()
+		return d.Reference.Release()
 	}
+	return false
 }
 
 func (d *Data) AddRef() {
@@ -200,7 +199,7 @@ func (d *Data) Use() *Data {
 
 type refPoolData struct {
 	data Data
-	ref  atomic.Int64
+	ref  AtomicRef
 	pool Pool[*Data]
 }
 
@@ -213,18 +212,16 @@ func newRefPoolData(p Pool[*Data], size uint) *Data {
 	return &ref.data
 }
 
-func (d *refPoolData) Release() {
-	if c := d.ref.Add(-1); c == 0 {
+func (d *refPoolData) Release() bool {
+	if d.ref.Release() {
 		if d.pool != nil {
 			d.pool.Put(&d.data)
 		}
-	} else if c < 0 {
-		panic(fmt.Errorf("repeat release buffer(%p), ref [%d -> %d]", d, c+1, c))
+		return true
 	}
+	return false
 }
 
 func (d *refPoolData) AddRef() {
-	if c := d.ref.Add(1); c <= 0 {
-		panic(fmt.Errorf("invalid buffer(%p) reference, ref [%d -> %d]", d, c-1, c))
-	}
+	d.ref.AddRef()
 }

@@ -3,6 +3,7 @@ package pool
 import (
 	"gitee.com/sy_183/common/assert"
 	"gitee.com/sy_183/common/log"
+	"gitee.com/sy_183/common/option"
 )
 
 var DebugLogger = assert.Must(log.Config{
@@ -17,11 +18,11 @@ type StaticDataPool struct {
 	size uint
 }
 
-func NewStaticDataPool(size uint, poolProvider PoolProvider[*Data]) *StaticDataPool {
+func NewStaticDataPool(size uint, poolProvider PoolProvider[*Data], poolOptions ...option.AnyOption) *StaticDataPool {
 	return &StaticDataPool{
 		pool: poolProvider(func(p Pool[*Data]) *Data {
 			return newRefPoolData(p, size)
-		}),
+		}, poolOptions...),
 		size: size,
 	}
 }
@@ -36,9 +37,13 @@ func (p *StaticDataPool) Alloc(len uint) (d *Data) {
 
 func (p *StaticDataPool) AllocCap(len, cap uint) (d *Data) {
 	if cap > p.size {
-		return NewData(make([]byte, len, cap))
+		return nil
 	}
-	d = p.pool.Get().Use()
+	d = p.pool.Get()
+	if d == nil {
+		return nil
+	}
+	d.AddRef()
 	d.Data = d.raw[:len:cap]
 	return d
 }

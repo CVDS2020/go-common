@@ -34,7 +34,7 @@ func SliceConvert[EI, EO any](s []EI, len, cap int) []EO {
 	return Make[EO](ss.Ptr, len, cap)
 }
 
-func Join[E any](ss ...[]E) []E {
+func JoinNew[E any](ss ...[]E) []E {
 	switch len(ss) {
 	case 0:
 		return nil
@@ -84,4 +84,36 @@ func AssignLen[E any](s []E, _len int) []E {
 
 func Map[E any](s []E, mapper func(E) E) {
 
+}
+
+func SliceDelete[E any](s []E, delete func(i int) bool) []E {
+	var ec int
+	i1, i2, i3 := -1, -1, -1
+	for i := 0; i < len(s); i++ {
+		if delete(i) {
+			if i1 < 0 {
+				i1, i2 = i, i+1
+			} else if i2 == i {
+				i2++
+			} else {
+				copy(s[i1-ec:], s[i2:i3])
+				ec += i2 - i1
+				i1, i2, i3 = i, i+1, -1
+			}
+		} else if i2 > 0 {
+			if i3 < 0 {
+				i3 = i + 1
+			} else if i3 == i {
+				i3++
+			}
+		}
+	}
+	if i2 > 0 {
+		if i3 > 0 {
+			copy(s[i1-ec:], s[i2:i3])
+		}
+		ec += i2 - i1
+	}
+	s = s[:len(s)-ec]
+	return s
 }

@@ -290,7 +290,7 @@ type Config struct {
 	Modules      map[string]string        `yaml:"modules" json:"modules" default:"{}"`
 }
 
-func (c *Config) PostHandle() (nc any, modified bool, err error) {
+func (c *Config) PostModify() (nc any, modified bool, err error) {
 	if c.Encoding != "json" && c.Encoding != "console" {
 		return nil, false, InvalidLogEncodingError
 	}
@@ -370,9 +370,11 @@ type Module interface {
 func (c *Config) Build(modules ...string) (*log.Logger, error) {
 	var conf *LoggerConfig
 	for _, module := range modules {
-		if c, has := c.Configs[module]; has {
-			conf = c
-			break
+		if cfgName, has := c.Modules[module]; has {
+			if cfg := c.Configs[cfgName]; cfg != nil {
+				conf = cfg
+				break
+			}
 		}
 	}
 	// logger config not found, use default

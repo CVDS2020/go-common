@@ -22,7 +22,7 @@ func TestQueue(t *testing.T) {
 func TestPanic(t *testing.T) {
 	a := make([]int, 1, 10)
 	//goPanicSliceB(1, 9)
-	i, j := 3, 9
+	i, j := -1, 9
 	_, _ = i, j
 	_ = a[i:]
 }

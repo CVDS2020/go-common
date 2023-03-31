@@ -101,7 +101,7 @@ func (g *Group) Add(name string, lifecycle Lifecycle) (*GroupLifecycleHolder, er
 				Lifecycle: child,
 				channel:   g.runningChannel,
 			})
-			go child.Run()
+			child.Background()
 		}
 		return child, nil
 	})
@@ -146,6 +146,7 @@ func (g *Group) getChildren(setLoaded bool) []*GroupLifecycleHolder {
 }
 
 func (g *Group) shutdownChildren(exclude map[*GroupLifecycleHolder]struct{}) {
+	// 此函数必需在状态为Closing的情况下执行
 	excluded := func(child *GroupLifecycleHolder) bool {
 		if exclude != nil {
 			_, has := exclude[child]
@@ -165,7 +166,6 @@ func (g *Group) shutdownChildren(exclude map[*GroupLifecycleHolder]struct{}) {
 	for _, future := range futures {
 		<-future
 	}
-	lock.LockDo(&g.childrenLock, func() { g.loaded = false })
 }
 
 func (g *Group) handleRunningSignal(handleContext func(ctx groupLifecycleContext)) (closeAll bool) {
@@ -236,6 +236,11 @@ func (g *Group) handleClosedSignal(handleContext func(ctx groupLifecycleContext)
 }
 
 func (g *Group) start(_ Lifecycle, interrupter chan struct{}) (runFn InterruptedRunFunc, err error) {
+	defer func() {
+		if err != nil {
+			g.reset()
+		}
+	}()
 	children := g.getChildren(true)
 	for _, child := range children {
 		child.AddStartedFuture(groupLifecycleContext{
@@ -281,6 +286,7 @@ func (g *Group) start(_ Lifecycle, interrupter chan struct{}) (runFn Interrupted
 }
 
 func (g *Group) run(_ Lifecycle, interrupter chan struct{}) error {
+	defer g.reset()
 	for {
 		select {
 		case <-g.runningChannel.Signal():
@@ -296,4 +302,10 @@ func (g *Group) run(_ Lifecycle, interrupter chan struct{}) error {
 			return nil
 		}
 	}
+}
+
+func (g *Group) reset() {
+	lock.LockDo(&g.childrenLock, func() { g.loaded = false })
+	g.runningChannel = newChildLifecycleChannel[*GroupLifecycleHolder]()
+	g.closedChannel = newChildLifecycleChannel[*GroupLifecycleHolder]()
 }

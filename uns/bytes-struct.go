@@ -33,6 +33,11 @@ func MakeBytes(ptr unsafe.Pointer, len, cap int) []byte {
 	return MakeSlice[byte](ptr, len, cap)
 }
 
+func MakeBytesUnchecked(ptr unsafe.Pointer, len, cap int) (bs []byte) {
+	*ConvertPointer[[]byte, SliceStruct](&bs) = SliceStruct{Ptr: ptr, Len: len, Cap: cap}
+	return
+}
+
 func BytesToString(bs []byte) string {
 	return *(*string)(unsafe.Pointer(&bs))
 }

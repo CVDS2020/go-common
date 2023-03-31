@@ -107,8 +107,9 @@ func SliceStructToSlice[E any](ss SliceStruct) []E {
 	return *(*[]E)(unsafe.Pointer(&ss))
 }
 
-func makeSlice[E any](ptr unsafe.Pointer, len, cap int) []E {
-	return SliceStructToSlice[E](SliceStruct{Ptr: ptr, Len: len, Cap: cap})
+func MakeSliceUnchecked[E any](ptr unsafe.Pointer, len, cap int) (es []E) {
+	*ConvertPointer[[]E, SliceStruct](&es) = SliceStruct{Ptr: ptr, Len: len, Cap: cap}
+	return
 }
 
 func MakeSlice[E any](ptr unsafe.Pointer, len, cap int) []E {
@@ -127,10 +128,25 @@ func MakeSlice[E any](ptr unsafe.Pointer, len, cap int) []E {
 		panicmakeslicecap()
 	}
 
-	return makeSlice[E](ptr, len, cap)
+	return MakeSliceUnchecked[E](ptr, len, cap)
+}
+
+func SlicePointer[E any](s []E) unsafe.Pointer {
+	return SliceStructOfPtr(&s).Ptr
 }
 
 func SliceConvert[EI, EO any](s []EI, len, cap int) []EO {
-	ss := SliceStructOfPtr[EI](&s)
-	return MakeSlice[EO](ss.Ptr, len, cap)
+	return MakeSlice[EO](SlicePointer(s), len, cap)
+}
+
+func SliceMerge[E any](s1, s2 []E) []E {
+	var e E
+	es := unsafe.Sizeof(e)
+	ss1 := SliceStructOfPtr(&s1)
+	s1Ptr := uintptr(ss1.Ptr)
+	s2Ptr := uintptr(SliceStructOfPtr(&s2).Ptr)
+	if s1Ptr+uintptr(len(s1))*es == s2Ptr {
+		return MakeSliceUnchecked[E](ss1.Ptr, len(s1)+len(s2), len(s1)+cap(s2))
+	}
+	return nil
 }

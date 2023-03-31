@@ -158,6 +158,7 @@ func (c consoleEncoder) EncodeEntry(ent Entry, fields []Field) (*bufferpool.Buff
 	// Add the message itself.
 	if ent.Message != "" {
 		c.addSeparatorIfNecessary(line)
+		line.AppendString(": ")
 		line.AppendString(ent.Message)
 	}
 

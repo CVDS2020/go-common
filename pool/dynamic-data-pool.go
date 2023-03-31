@@ -1,11 +1,9 @@
 package pool
 
-import "sort"
-
-type dataPool struct {
-	size uint
-	*StaticDataPool
-}
+import (
+	"gitee.com/sy_183/common/option"
+	"sort"
+)
 
 type DynamicDataPool struct {
 	pools []*StaticDataPool
@@ -28,13 +26,13 @@ func NewDynamicDataPool(pools ...*StaticDataPool) *DynamicDataPool {
 	return p
 }
 
-func NewDynamicDataPoolWithThresholds(poolProvider PoolProvider[*Data], thresholds ...int) *DynamicDataPool {
+func NewDynamicDataPoolWithThresholds(thresholds []int, poolProvider PoolProvider[*Data], poolOptions ...option.AnyOption) *DynamicDataPool {
 	sort.Ints(thresholds)
 	p := new(DynamicDataPool)
 	var last int
 	for _, threshold := range thresholds {
 		if threshold > last {
-			p.pools = append(p.pools, NewStaticDataPool(uint(threshold), poolProvider))
+			p.pools = append(p.pools, NewStaticDataPool(uint(threshold), poolProvider, poolOptions...))
 			p.sizes = append(p.sizes, uint(threshold))
 			last = threshold
 		}
@@ -42,7 +40,7 @@ func NewDynamicDataPoolWithThresholds(poolProvider PoolProvider[*Data], threshol
 	return p
 }
 
-func NewDynamicDataPoolWithExp(min, max uint, poolProvider PoolProvider[*Data]) *DynamicDataPool {
+func NewDynamicDataPoolWithExp(min, max uint, poolProvider PoolProvider[*Data], poolOptions ...option.AnyOption) *DynamicDataPool {
 	var thresholds []int
 	for i := 1; i < 63; i++ {
 		if uint(1<<i) >= min && uint(1<<(i-1)) < max {
@@ -51,7 +49,7 @@ func NewDynamicDataPoolWithExp(min, max uint, poolProvider PoolProvider[*Data]) 
 			break
 		}
 	}
-	return NewDynamicDataPoolWithThresholds(poolProvider, thresholds...)
+	return NewDynamicDataPoolWithThresholds(thresholds, poolProvider, poolOptions...)
 }
 
 func (p *DynamicDataPool) Alloc(len uint) *Data {
@@ -60,7 +58,7 @@ func (p *DynamicDataPool) Alloc(len uint) *Data {
 			return pool.Alloc(len)
 		}
 	}
-	return NewData(make([]byte, len, len))
+	return nil
 }
 
 func (p *DynamicDataPool) AllocCap(len, cap uint) *Data {
@@ -69,5 +67,5 @@ func (p *DynamicDataPool) AllocCap(len, cap uint) *Data {
 			return pool.AllocCap(len, cap)
 		}
 	}
-	return NewData(make([]byte, len, cap))
+	return nil
 }
